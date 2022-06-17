@@ -137,13 +137,14 @@ func sqsWorker(ctx context.Context, wg *sync.WaitGroup, svc *sqs.SQS, batchMode 
 	if err != nil {
 		return err
 	}
+	insertedObjectKeys := make(map[string]bool)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
 		}
-		if err := handleMessage(ctx, svc, res.QueueUrl); err != nil {
+		if err := HandleMessage(ctx, svc, res.QueueUrl, &insertedObjectKeys); err != nil {
 			if _, ok := err.(NoMessageError); ok {
 				if batchMode {
 					break
@@ -162,7 +163,8 @@ func sqsWorker(ctx context.Context, wg *sync.WaitGroup, svc *sqs.SQS, batchMode 
 	return nil
 }
 
-func handleMessage(ctx context.Context, svc *sqs.SQS, queueUrl *string) error {
+func HandleMessage(ctx context.Context, svc *sqs.SQS, queueUrl *string, insertedObjectKeys *map[string]bool) error {
+	log.Println("asdf HandleMessage call")
 	var completed = false
 	res, err := svc.ReceiveMessageWithContext(ctx, &sqs.ReceiveMessageInput{
 		MaxNumberOfMessages: aws.Int64(1),
@@ -195,6 +197,22 @@ func handleMessage(ctx context.Context, svc *sqs.SQS, queueUrl *string) error {
 		log.Printf("[info] [%s] Skipping %s", msgId, event.String())
 	} else {
 		log.Printf("[info] [%s] Importing event: %s", msgId, event)
+
+		var filteredRecords []*EventRecord;
+
+		for _, record := range event.Records {
+			_, has:= (*insertedObjectKeys)[record.S3.Object.Key]
+			if !has {
+				(*insertedObjectKeys)[record.S3.Object.Key] = true
+				filteredRecords = append(filteredRecords, record)
+				log.Println("asdf Handling event")
+			} else {
+				log.Println("asdf Skipping event")
+			}
+		}
+
+		event.Records = filteredRecords
+
 		n, err := Import(event)
 		if err != nil {
 			log.Printf("[error] [%s] Import failed. %s", msgId, err)
